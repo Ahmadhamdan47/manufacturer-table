@@ -304,6 +304,86 @@ const EnhancedHeader = ({
   )
 }
 
+// Add a debug utility near the top of the component
+// Add this function after the component declaration but before any other code
+// Update the fetchDataFromMultipleSources function to handle HTML responses better
+// Replace the entire fetchDataFromMultipleSources function with this improved version:
+
+const fetchDataFromMultipleSources = async () => {
+  // Try the proxy route first (which has fallback to local data)
+  try {
+    console.log("Attempting to fetch from proxy route...")
+    const response = await fetch("/api/manufacturer/proxy")
+
+    // Check if the response is HTML (common error case)
+    const contentType = response.headers.get("content-type")
+    if (contentType && contentType.includes("text/html")) {
+      console.error("Proxy route returned HTML instead of JSON, skipping this source")
+      throw new Error("Invalid content type: HTML received instead of JSON")
+    }
+
+    if (response.ok) {
+      try {
+        const data = await response.json()
+        if (Array.isArray(data) && data.length > 0) {
+          console.log(`Successfully fetched ${data.length} manufacturers from proxy route`)
+          return data
+        }
+      } catch (parseError) {
+        console.error("Error parsing JSON from proxy route:", parseError)
+        // Continue to next data source
+      }
+    } else {
+      console.error(`Proxy route returned status: ${response.status}`)
+    }
+  } catch (error) {
+    console.error("Error fetching from proxy:", error)
+  }
+
+  // Try the direct API route next
+  try {
+    console.log("Attempting to fetch from direct API route...")
+    const response = await fetch("/api/manufacturer")
+
+    // Check if the response is HTML
+    const contentType = response.headers.get("content-type")
+    if (contentType && contentType.includes("text/html")) {
+      console.error("Direct API route returned HTML instead of JSON, skipping this source")
+      throw new Error("Invalid content type: HTML received instead of JSON")
+    }
+
+    if (response.ok) {
+      try {
+        const data = await response.json()
+        if (Array.isArray(data) && data.length > 0) {
+          console.log(`Successfully fetched ${data.length} manufacturers from direct API route`)
+          return data
+        }
+      } catch (parseError) {
+        console.error("Error parsing JSON from direct API route:", parseError)
+        // Continue to next data source
+      }
+    } else {
+      console.error(`Direct API route returned status: ${response.status}`)
+    }
+  } catch (error) {
+    console.error("Error fetching from direct API:", error)
+  }
+
+  // Finally, use the local data as a fallback
+  console.log("Using local manufacturer data as fallback")
+  try {
+    // Import the manufacturers directly
+    const { manufacturers } = await import("@/app/api/manufacturer/route")
+    console.log(`Successfully loaded ${manufacturers.length} manufacturers from local data`)
+    return manufacturers
+  } catch (error) {
+    console.error("Error loading local manufacturer data:", error)
+    // Return an empty array as a last resort
+    return []
+  }
+}
+
 export function ManufacturerTable() {
   // Main data state
   const [allData, setAllData] = useState<Manufacturer[]>([])
@@ -466,7 +546,7 @@ export function ManufacturerTable() {
     debounce((updatedManufacturer) => {
       // Make the API call
       api
-        .put(`/api/manufacturer/update/proxy/${updatedManufacturer.ManufacturerId}`, updatedManufacturer)
+        .put(`/api/manufacturer/${updatedManufacturer.ManufacturerId}`, updatedManufacturer)
         .then(() => {
           console.log(`Successfully saved change for manufacturer ${updatedManufacturer.ManufacturerId}`)
         })
@@ -572,39 +652,6 @@ export function ManufacturerTable() {
   // Add this data fetching function to try multiple sources
   // Add this function right before or after the fetchManufacturers function:
 
-  // Attempt to fetch data from multiple sources
-  const fetchDataFromMultipleSources = async () => {
-    // Try the proxy route first (which has fallback to local data)
-    try {
-      const response = await fetch("/api/manufacturer/proxy")
-      if (response.ok) {
-        const data = await response.json()
-        if (Array.isArray(data) && data.length > 0) {
-          return data
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching from proxy:", error)
-    }
-
-    // Try the direct API route next
-    try {
-      const response = await fetch("/api/manufacturer")
-      if (response.ok) {
-        const data = await response.json()
-        if (Array.isArray(data) && data.length > 0) {
-          return data
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching from direct API:", error)
-    }
-
-    // Finally, use the imported manufacturers directly
-    const { manufacturers } = await import("@/app/api/manufacturer/route")
-    return manufacturers
-  }
-
   // Then modify your fetchManufacturers function to use this new function:
   // Replace the whole fetchManufacturers function with this:
 
@@ -706,6 +753,8 @@ export function ManufacturerTable() {
 
   // Add a new function to save all pending changes
   const saveAllChanges = async () => {
+    console.log("Current pending changes:", pendingChanges)
+
     if (pendingChanges.length === 0) {
       showNotification("No changes to save", "info")
       return
@@ -717,6 +766,7 @@ export function ManufacturerTable() {
     // Process changes sequentially
     for (const change of pendingChanges) {
       const { rowId, columnId, newValue } = change
+      console.log(`Processing change for ${rowId}-${columnId}: new value = ${newValue}`)
 
       try {
         const payload = {
@@ -724,7 +774,10 @@ export function ManufacturerTable() {
           [columnId]: newValue === "N/A" ? null : newValue,
         }
 
-        await api.put(`/api/manufacturer/update/proxy/${rowId}`, payload)
+        console.log("Sending payload:", payload)
+
+        await api.put(`/api/manufacturer/${rowId}`, payload)
+        console.log(`Successfully updated ${columnId} for manufacturer ${rowId}`)
 
         // Mark as successful
         results.push({
@@ -752,6 +805,7 @@ export function ManufacturerTable() {
 
     // Clear pending changes that were successful
     const successfulRowColumns = results.filter((r) => r.success).map((r) => `${r.rowId}-${r.columnId}`)
+    console.log("Successful changes:", successfulRowColumns)
 
     setPendingChanges((prev) =>
       prev.filter((change) => !successfulRowColumns.includes(`${change.rowId}-${change.columnId}`)),
@@ -778,14 +832,22 @@ export function ManufacturerTable() {
     }
   }
 
+  // Fix the handleCellMouseEnter function to properly track changes
+
   const handleCellMouseEnter = (rowId: string) => {
     if (isDragging && dragValue && dragColumnId) {
       const row = tableData.find((row) => row.ManufacturerId.toString() === rowId)
 
       if (!row) return
 
+      // Compare as strings to avoid type mismatches
+      const currentValue = String(row[dragColumnId as keyof Manufacturer] || "")
+      const newValue = String(dragValue)
+
       // Only proceed if the value is actually different
-      if (row[dragColumnId as keyof Manufacturer] !== dragValue) {
+      if (currentValue !== newValue) {
+        console.log(`Changing ${rowId}-${dragColumnId} from "${currentValue}" to "${newValue}"`)
+
         // Track the change
         const existingChangeIndex = pendingChanges.findIndex(
           (change) => change.rowId === rowId && change.columnId === dragColumnId,
@@ -832,17 +894,39 @@ export function ManufacturerTable() {
     }
   }
 
-  // Handle saving row changes
+  // Also fix the handleSaveRow function to update pendingChanges
   const handleSaveRow = async (rowId: string, values: any) => {
     try {
       const rowIndex = tableData.findIndex((row) => row.ManufacturerId.toString() === rowId)
       if (rowIndex === -1) return
 
-      const updatedManufacturer = { ...tableData[rowIndex], ...values }
+      const originalManufacturer = tableData[rowIndex]
+      const updatedManufacturer = { ...originalManufacturer, ...values }
+
+      // Track changes for each modified field
+      Object.keys(values).forEach((field) => {
+        if (values[field] !== originalManufacturer[field as keyof Manufacturer]) {
+          setPendingChanges((prev) => [
+            ...prev,
+            {
+              rowId,
+              columnId: field,
+              oldValue: originalManufacturer[field as keyof Manufacturer],
+              newValue: values[field],
+            },
+          ])
+
+          // Mark cell as modified
+          setChangedCells((prev) => ({
+            ...prev,
+            [`${rowId}-${field}`]: "modified",
+          }))
+        }
+      })
 
       try {
         // Make the API call using the proxy route
-        await api.put(`/api/manufacturer/update/proxy/${rowId}`, updatedManufacturer)
+        await api.put(`/api/manufacturer/${rowId}`, updatedManufacturer)
         showNotification("Manufacturer updated successfully", "success")
       } catch (apiError) {
         console.error("API error during save, continuing with local update:", apiError)
@@ -864,32 +948,15 @@ export function ManufacturerTable() {
       setHasUnsavedChanges(true)
     } catch (error) {
       console.error("Error updating manufacturer:", error)
-      showNotification("Error updating manufacturer", "error")
+      showNotification("Failed to update row", "error")
     }
   }
 
-  // Handle deleting a row
-  const handleDeleteRow = async (rowId: string) => {
-    try {
-      if (window.confirm("Are you sure you want to delete this manufacturer?")) {
-        try {
-          await api.delete(`/api/manufacturer/delete/proxy/${rowId}`)
-          showNotification("Manufacturer deleted successfully", "success")
-        } catch (apiError) {
-          console.error("API error during delete, continuing with local update:", apiError)
-          showNotification("API error during delete, continuing with local update", "error")
-          // Continue with local update even if API fails
-        }
-
-        // Update local data regardless of API success
-        setTableData((prevData) => prevData.filter((manufacturer) => manufacturer.ManufacturerId.toString() !== rowId))
-        setAllData((prevData) => prevData.filter((manufacturer) => manufacturer.ManufacturerId.toString() !== rowId))
-        setHasUnsavedChanges(true)
-      }
-    } catch (error) {
-      console.error("Error deleting manufacturer:", error)
-      showNotification("Error deleting manufacturer", "error")
-    }
+  const logState = () => {
+    console.log("Current state:")
+    console.log("- pendingChanges:", pendingChanges)
+    console.log("- changedCells:", changedCells)
+    console.log("- hasUnsavedChanges:", hasUnsavedChanges)
   }
 
   // Handle column resize
@@ -1110,7 +1177,7 @@ export function ManufacturerTable() {
       try {
         // Delete each selected row
         const promises = Array.from(selectedRows).map((rowId) =>
-          api.delete(`/api/manufacturer/delete/proxy/${rowId}`).catch((error) => {
+          api.delete(`/api/manufacturer/${rowId}`).catch((error) => {
             console.error(`Error deleting manufacturer ${rowId}:`, error)
             return { error, rowId }
           }),
@@ -1206,6 +1273,27 @@ export function ManufacturerTable() {
     setEditFormData({})
   }
 
+  // Add a function to handle deleting a row
+  const handleDeleteRow = async (rowId: string) => {
+    if (window.confirm("Are you sure you want to delete this manufacturer?")) {
+      setIsLoading(true)
+      try {
+        await api.delete(`/api/manufacturer/${rowId}`)
+
+        // Update local data
+        setTableData((prevData) => prevData.filter((manufacturer) => manufacturer.ManufacturerId.toString() !== rowId))
+        setAllData((prevData) => prevData.filter((manufacturer) => manufacturer.ManufacturerId.toString() !== rowId))
+
+        showNotification("Manufacturer deleted successfully", "success")
+      } catch (error) {
+        console.error("Error deleting manufacturer:", error)
+        showNotification("Failed to delete manufacturer", "error")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+  }
+
   return (
     <div
       className={cn(
@@ -1260,6 +1348,14 @@ export function ManufacturerTable() {
             className="bg-white hover:bg-gray-50 text-[#00A651] border-[#00A651]"
           >
             Save
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={logState}
+            className="bg-white hover:bg-gray-50 text-gray-500 border-gray-300"
+          >
+            Debug
           </Button>
 
           <Button

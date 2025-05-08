@@ -41,7 +41,10 @@ export function AddManufacturerModal({ opened, onClose, onAddSuccess }: AddManuf
       }
 
       // Make API call to add manufacturer using the proxy route
-      const response = await api.post("/api/manufacturer/add/proxy", manufacturerData)
+      const response = await api.post("/api/manufacturer", manufacturerData)
+
+      // Add more detailed logging
+      console.log("Manufacturer added successfully:", response.data)
 
       // Call success callback with the new manufacturer
       onAddSuccess(response.data)
